@@ -1,0 +1,996 @@
+version: '3.8'
+
+services:
+  # Core Infrastructure
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - agentic-network
+      
+
+# Usage
+#   Start:              docker compose up
+#   With helpers:       docker compose -f docker-compose.yml -f ./dev/docker-compose.dev.yml up
+#   Stop:               docker compose down
+#   Destroy:            docker compose -f docker-compose.yml -f ./dev/docker-compose.dev.yml down -v --remove-orphans
+#   Reset everything:  ./reset.sh
+
+  studio:
+    container_name: supabase-studio
+    image: supabase/studio:2025.06.30-sha-6f5982d
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://studio:3000/api/platform/profile').then((r) => {if (r.status !== 200) throw new Error(r.status)})"
+        ]
+      timeout: 10s
+      interval: 5s
+      retries: 3
+    depends_on:
+      analytics:
+        condition: service_healthy
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
+
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+
+      # OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+      LOGFLARE_PRIVATE_ACCESS_TOKEN: ${LOGFLARE_PRIVATE_ACCESS_TOKEN}
+      LOGFLARE_URL: http://analytics:4000
+      NEXT_PUBLIC_ENABLE_LOGS: true
+      # Comment to use Big Query backend for analytics
+      NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
+      # Uncomment to use Big Query backend for analytics
+      # NEXT_ANALYTICS_BACKEND_PROVIDER: bigquery
+    ports:
+      - 54321:3000
+    networks:
+      - agentic-network
+  kong:
+    container_name: supabase-kong
+    image: kong:2.8.1
+    restart: unless-stopped
+    ports:
+      - ${KONG_HTTP_PORT}:8000/tcp
+      - ${KONG_HTTPS_PORT}:8443/tcp
+    volumes:
+      # https://github.com/supabase/supabase/issues/12661
+      - ./volumes/api/kong.yml:/home/kong/temp.yml:ro,z
+    depends_on:
+      analytics:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      # https://github.com/supabase/cli/issues/14
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    # https://unix.stackexchange.com/a/294837
+    entrypoint: bash -c 'eval "echo \"$$(cat ~/temp.yml)\"" > ~/kong.yml && /docker-entrypoint.sh kong docker-start'
+    networks:
+      - agentic-network
+  auth:
+    container_name: supabase-auth
+    image: supabase/gotrue:v2.177.0
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9999/health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    volumes:
+      - /supabase/init:/docker-entrypoint-initdb.d
+    depends_on:
+      supabase-db:
+        # Disable this if you are using an external Postgres database
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${SUPABASE_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}
+
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
+
+      # Uncomment to bypass nonce check in ID Token flow. Commonly set to true when using Google Sign In on mobile.
+      # GOTRUE_EXTERNAL_SKIP_NONCE_CHECK: true
+
+      # GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED: true
+      # GOTRUE_SMTP_MAX_FREQUENCY: 1s
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
+      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
+
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+      # Uncomment to enable custom access token hook. Please see: https://supabase.com/docs/guides/auth/auth-hooks for full list of hooks and additional details about custom_access_token_hook
+
+      # GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+      # GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
+      # GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_SECRETS: "<standard-base64-secret>"
+
+      # GOTRUE_HOOK_MFA_VERIFICATION_ATTEMPT_ENABLED: "true"
+      # GOTRUE_HOOK_MFA_VERIFICATION_ATTEMPT_URI: "pg-functions://postgres/public/mfa_verification_attempt"
+
+      # GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_ENABLED: "true"
+      # GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_URI: "pg-functions://postgres/public/password_verification_attempt"
+
+      # GOTRUE_HOOK_SEND_SMS_ENABLED: "false"
+      # GOTRUE_HOOK_SEND_SMS_URI: "pg-functions://postgres/public/custom_access_token_hook"
+      # GOTRUE_HOOK_SEND_SMS_SECRETS: "v1,whsec_VGhpcyBpcyBhbiBleGFtcGxlIG9mIGEgc2hvcnRlciBCYXNlNjQgc3RyaW5n"
+
+      # GOTRUE_HOOK_SEND_EMAIL_ENABLED: "false"
+      # GOTRUE_HOOK_SEND_EMAIL_URI: "http://host.docker.internal:54321/functions/v1/email_sender"
+      # GOTRUE_HOOK_SEND_EMAIL_SECRETS: "v1,whsec_VGhpcyBpcyBhbiBleGFtcGxlIG9mIGEgc2hvcnRlciBCYXNlNjQgc3RyaW5n"
+    networks:
+      - agentic-network
+  rest:
+    container_name: supabase-rest
+    image: postgrest/postgrest:v12.2.12
+    restart: unless-stopped
+    depends_on:
+      supabase-db:
+        # Disable this if you are using an external Postgres database
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${SUPABASE_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
+    command:
+      [
+        "postgrest"
+      ]
+    networks:
+      - agentic-network
+  realtime:
+    # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
+    container_name: realtime-dev.supabase-realtime
+    image: supabase/realtime:v2.34.47
+    restart: unless-stopped
+    depends_on:
+      supabase-db:
+        # Disable this if you are using an external Postgres database
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-sSfL",
+          "--head",
+          "-o",
+          "/dev/null",
+          "-H",
+          "Authorization: Bearer ${ANON_KEY}",
+          "http://localhost:4000/api/tenants/realtime-dev/health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    environment:
+      PORT: 4000
+      DB_HOST: ${POSTGRES_HOST}
+      DB_PORT: ${POSTGRES_PORT}
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_ENC_KEY: supabaserealtime
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: true
+      RUN_JANITOR: true
+    networks:
+      - agentic-network
+  # To use S3 backed storage: docker compose -f docker-compose.yml -f docker-compose.s3.yml up
+  storage:
+    container_name: supabase-storage
+    image: supabase/storage-api:v1.25.7
+    restart: unless-stopped
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://storage:5000/status"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    depends_on:
+      supabase-db:
+        # Disable this if you are using an external Postgres database
+        condition: service_healthy
+      rest:
+        condition: service_started
+      imgproxy:
+        condition: service_started
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${SUPABASE_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      # TODO: https://github.com/supabase/storage-api/issues/55
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://imgproxy:5001
+    networks:
+      - agentic-network
+  imgproxy:
+    container_name: supabase-imgproxy
+    image: darthsim/imgproxy:v3.8.0
+    restart: unless-stopped
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "imgproxy",
+          "health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    environment:
+      IMGPROXY_BIND: ":5001"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION}
+    networks:
+      - agentic-network
+  meta:
+    container_name: supabase-meta
+    image: supabase/postgres-meta:v0.91.0
+    restart: unless-stopped
+    depends_on:
+      supabase-db:
+        # Disable this if you are using an external Postgres database
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: ${POSTGRES_HOST}
+      PG_META_DB_PORT: ${POSTGRES_PORT}
+      PG_META_DB_NAME: ${POSTGRES_DB}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+    networks:
+      - agentic-network
+  functions:
+    container_name: supabase-edge-functions
+    image: supabase/edge-runtime:v1.69.6
+    restart: unless-stopped
+    volumes:
+      - ./volumes/functions:/home/deno/functions:Z
+    depends_on:
+      analytics:
+        condition: service_healthy
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgresql://postgres:${SUPABASE_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      # TODO: Allow configuring VERIFY_JWT per function. This PR might help: https://github.com/supabase/cli/pull/786
+      VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT}"
+    command:
+      [
+        "start",
+        "--main-service",
+        "/home/deno/functions/main"
+      ]
+    networks:
+      - agentic-network
+
+  analytics:
+    container_name: supabase-analytics
+    image: supabase/logflare:1.14.2
+    restart: unless-stopped
+    ports:
+      - 4000:4000
+    # Uncomment to use Big Query backend for analytics
+    # volumes:
+    #   - type: bind
+    #     source: ${PWD}/gcloud.json
+    #     target: /opt/app/rel/logflare/bin/gcloud.json
+    #     read_only: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "http://localhost:4000/health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 10
+    depends_on:
+      supabase-db:
+        # Disable this if you are using an external Postgres database
+        condition: service_healthy
+    environment:
+      LOGFLARE_NODE_HOST: 127.0.0.1
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_DATABASE: _supabase
+      DB_HOSTNAME: ${POSTGRES_HOST}
+      DB_PORT: ${POSTGRES_PORT}
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      DB_SCHEMA: _analytics
+      LOGFLARE_PUBLIC_ACCESS_TOKEN: ${LOGFLARE_PUBLIC_ACCESS_TOKEN}
+      LOGFLARE_PRIVATE_ACCESS_TOKEN: ${LOGFLARE_PRIVATE_ACCESS_TOKEN}
+      LOGFLARE_SINGLE_TENANT: true
+      LOGFLARE_SUPABASE_MODE: true
+      LOGFLARE_MIN_CLUSTER_SIZE: 1
+
+      # Comment variables to use Big Query backend for analytics
+      POSTGRES_BACKEND_URL: postgresql://supabase_admin:${SUPABASE_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/_supabase
+      POSTGRES_BACKEND_SCHEMA: _analytics
+      LOGFLARE_FEATURE_FLAG_OVERRIDE: multibackend=true
+      # Uncomment to use Big Query backend for analytics
+      # GOOGLE_PROJECT_ID: ${GOOGLE_PROJECT_ID}
+      # GOOGLE_PROJECT_NUMBER: ${GOOGLE_PROJECT_NUMBER}
+    networks:
+      - agentic-network
+
+# Comment out everything below this point if you are using an external Postgres database
+  supabase-db:
+    container_name: supabase-db
+    image: supabase/postgres:15.8.1.060
+    restart: unless-stopped
+    volumes:
+      - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
+      # Must be superuser to create event trigger
+      - ./volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:Z
+      # Must be superuser to alter reserved role
+      - ./volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:Z
+      # Initialize the database settings with JWT_SECRET and JWT_EXP
+      - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
+      # PGDATA directory is persisted between restarts
+      - ./volumes/db/data:/var/lib/postgresql/data:Z
+      # Changes required for internal supabase data such as _analytics
+      - ./volumes/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:Z
+      # Changes required for Analytics support
+      - ./volumes/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:Z
+      # Changes required for Pooler support
+      - ./volumes/db/pooler.sql:/docker-entrypoint-initdb.d/migrations/99-pooler.sql:Z
+      # Use named volume to persist pgsodium decryption key between restarts
+      - db-config:/etc/postgresql-custom
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      vector:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: ${POSTGRES_PORT}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      PGPASSWORD: ${SUPABASE_DB_PASSWORD}
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # This is the key fix - set the main postgres user
+      POSTGRES_USER: ${POSTGRES_USER}
+      # Supabase admin will be created by init scripts
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY}
+    networks:
+      - agentic-network
+    command:
+      [
+        "postgres",
+        "-c",
+        "config_file=/etc/postgresql/postgresql.conf",
+        "-c",
+        "log_min_messages=fatal" # prevents Realtime polling queries from appearing in logs
+      ]
+  vector:
+    container_name: supabase-vector
+    image: timberio/vector:0.28.1-alpine
+    restart: unless-stopped
+    volumes:
+      - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro,z
+      - ${DOCKER_SOCKET_LOCATION}:/var/run/docker.sock:ro,z
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://vector:9001/health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    environment:
+      LOGFLARE_PUBLIC_ACCESS_TOKEN: ${LOGFLARE_PUBLIC_ACCESS_TOKEN}
+    networks:
+      - agentic-network
+    command:
+      [
+        "--config",
+        "/etc/vector/vector.yml"
+      ]
+    security_opt:
+      - "label=disable"
+
+  # Update the DATABASE_URL if you are using an external Postgres database
+  supavisor:
+    container_name: supabase-pooler
+    image: supabase/supavisor:2.5.7
+    restart: unless-stopped
+    ports:
+      - ${POSTGRES_PORT}:5432
+      - ${POOLER_PROXY_PORT_TRANSACTION}:6543
+    volumes:
+      - ./volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro,z
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-sSfL",
+          "--head",
+          "-o",
+          "/dev/null",
+          "http://127.0.0.1:4000/api/health"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      DATABASE_URL: ecto://supabase_admin:${SUPABASE_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/_supabase
+      CLUSTER_POSTGRES: true
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      REGION: local
+      ERL_AFLAGS: -proto_dist inet_tcp
+      POOLER_TENANT_ID: ${POOLER_TENANT_ID}
+      POOLER_DEFAULT_POOL_SIZE: ${POOLER_DEFAULT_POOL_SIZE}
+      POOLER_MAX_CLIENT_CONN: ${POOLER_MAX_CLIENT_CONN}
+      POOLER_POOL_MODE: transaction
+      DB_POOL_SIZE: ${POOLER_DB_POOL_SIZE}
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "/app/bin/migrate && /app/bin/supavisor eval \"$$(cat /etc/pooler/pooler.exs)\" && /app/bin/server"
+      ]
+    networks:
+      - agentic-network
+
+
+  # # --------------------
+  # # Database Layer
+  # # --------------------
+  # supabase-db:
+  #   image: supabase/postgres:15.1.0.117
+  #   container_name: supabase-db
+  #   environment:
+  #     POSTGRES_DB: postgres
+  #     POSTGRES_USER: supabase_admin
+  #     POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
+  #     JWT_SECRET: ${JWT_SECRET}
+  #     JWT_EXP: 3600
+  #   volumes:
+  #     - supabase-db-data:/var/lib/postgresql/data
+  #     - ./supabase/init:/docker-entrypoint-initdb.d
+  #   ports:
+  #     - "5432:5432"
+  #   networks:
+  #     - agentic-network
+  #   command: >
+  #     postgres 
+  #     -c config_file=/etc/postgresql/postgresql.conf
+  #     -c log_min_messages=fatal
+  #     -c shared_preload_libraries=vector
+
+  # # --------------------
+  # # Auth Layer (GoTrue)
+  # # --------------------
+  # supabase-auth:
+  #   image: supabase/gotrue:v2.99.0
+  #   container_name: supabase-auth
+  #   depends_on:
+  #     - supabase-db
+  #   environment:
+  #     GOTRUE_API_HOST: 0.0.0.0
+  #     GOTRUE_API_PORT: 9999
+  #     GOTRUE_DB_DRIVER: postgres
+  #     GOTRUE_DB_DATABASE_URL: postgres://supabase_admin:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
+  #     GOTRUE_SITE_URL: ${SITE_URL}
+  #     GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+  #     GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}
+  #     GOTRUE_JWT_SECRET: ${JWT_SECRET}
+  #   networks:
+  #     - agentic-network
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.supabase-auth.rule=Host(`${DOMAIN}`) && PathPrefix(`/auth/v1`)"
+  #     - "traefik.http.services.supabase-auth.loadbalancer.server.port=9999"
+
+  # # --------------------
+  # # REST Layer (PostgREST)
+  # # --------------------
+  # supabase-rest:
+  #   image: postgrest/postgrest:v11.2.0
+  #   container_name: supabase-rest
+  #   depends_on:
+  #     - supabase-db
+  #   environment:
+  #     PGRST_DB_URI: postgres://supabase_admin:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
+  #     PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}  # default to public if not set
+  #     PGRST_DB_ANON_ROLE: anon
+  #     PGRST_JWT_SECRET: ${JWT_SECRET}
+  #     PGRST_DB_USE_LEGACY_GUCS: "false"
+  #   networks:
+  #     - agentic-network
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.supabase-rest.rule=Host(`${DOMAIN}`) && PathPrefix(`/rest/v1`)"
+  #     - "traefik.http.services.supabase-rest.loadbalancer.server.port=3000"
+
+  # # --------------------
+  # # API Gateway (Kong)
+  # # --------------------
+  # supabase-kong-studio:
+  #   image: kong:2.1
+  #   container_name: supabase-kong-studio
+  #   environment:
+  #     KONG_DATABASE: "off"
+  #     KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+  #     KONG_DNS_ORDER: LAST,A,CNAME
+  #   volumes:
+  #     - ./supabase/kong.yml:/var/lib/kong/kong.yml:ro
+  #   ports:
+  #     - "8000:8000"   # API Gateway
+  #     - "8443:8443"   # TLS (optional)
+  #   networks:
+  #     - agentic-network
+
+  # # --------------------
+  # # Supabase Studio (Frontend)
+  # # --------------------
+  # supabase-studio:
+  #   image: supabase/studio:v0.1.0
+  #   container_name: supabase-studio
+  #   depends_on:
+  #     - supabase-kong-studio
+  #   environment:
+  #     SUPABASE_URL: http://supabase-kong-studio:8000
+  #     SUPABASE_PUBLIC_URL: http://localhost:54321
+  #     SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}       # must match JWT_SECRET
+  #     SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY} # must match service role
+  #   ports:
+  #     - "54321:3000"
+  #   networks:
+  #     - agentic-network
+
+  # Graph Databases
+  neo4j-stack:
+    image: neo4j:5.13-community
+    container_name: neo4j-stack
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_apoc_export_file_enabled: true
+      NEO4J_apoc_import_file_enabled: true
+      NEO4J_apoc_import_file_use__neo4j__config: true
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+      - neo4j-import:/var/lib/neo4j/import
+      - neo4j-plugins:/plugins
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+    networks:
+      - agentic-network
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.neo4j.rule=Host(`${DOMAIN}`) && PathPrefix(`/neo4j`)"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.neo4j.rule=Host(`${DOMAIN}`) && PathPrefix(`/neo4j`)"
+      - "traefik.http.services.neo4j.loadbalancer.server.port=7474"
+
+  # # Grafiti Knowledge Graph (assuming custom implementation)
+  # graphiti-kg:
+  #   build:
+  #     context: ./graphiti
+  #     dockerfile: Dockerfile
+  #   container_name: graphiti-kg
+  #   depends_on:
+  #     - neo4j-stack
+  #     - supabase-db
+  #   environment:
+  #     NEO4J_URI: bolt://neo4j-stack:7688
+  #     NEO4J_USERNAME: neo4j
+  #     NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+  #     POSTGRES_URL: postgres://supabase_admin:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
+  #   volumes:
+  #     - grafiti-data:/app/data
+  #   ports:
+  #     - 8000:8000
+  #   networks:
+  #     - agentic-network
+  #   # labels:
+  #   #   - "traefik.enable=true"
+  #   #   - "traefik.http.routers.grafiti.rule=Host(`${DOMAIN}`) && PathPrefix(`/grafiti`)"
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.graphiti.rule=Host(`${DOMAIN}`) && PathPrefix(`/graphiti`)"
+  #     - "traefik.http.services.graphiti.loadbalancer.server.port=9999"
+
+  # Workflow & Automation
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    environment:
+      N8N_SECURE_COOKIE: false
+      N8N_HOST: ${DOMAIN}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: https
+      NODE_ENV: production
+      WEBHOOK_URL: https://${DOMAIN}/
+      GENERIC_TIMEZONE: ${TIMEZONE}
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: supabase-db
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n_user
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD}
+    volumes:
+      - n8n-data:/home/node/.n8n
+    # depends_on:
+      # - supabase-db
+    ports:
+      - 5678:5678
+    networks:
+      - agentic-network
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.n8n.rule=Host(`${DOMAIN}`) && PathPrefix(`/n8n`)"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`${DOMAIN}`) && PathPrefix(`/n8n`)"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+
+  # AI Flow Management
+  flowise:
+    image: flowiseai/flowise:latest
+    container_name: flowise
+    environment:
+      DATABASE_PATH: /opt/flowise/.flowise
+      APIKEY_PATH: /opt/flowise/.flowise
+      SECRETKEY_PATH: /opt/flowise/.flowise
+      LOG_LEVEL: info
+      LOG_PATH: /opt/flowise/.flowise/logs
+    volumes:
+      - flowise-data:/opt/flowise/.flowise
+    ports:
+      - "3000:3000"
+    networks:
+      - agentic-network
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.flowise.rule=Host(`${DOMAIN}`) && PathPrefix(`/flowise`)"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.flowise.rule=Host(`${DOMAIN}`) && PathPrefix(`/flowise`)"
+      - "traefik.http.services.flowise.loadbalancer.server.port=3000"
+  # UI Layer
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      DATABASE_URL: postgres://webui_user:${WEBUI_DB_PASSWORD}@supabase-db:5432/webui
+    volumes:
+      - open-webui-data:/app/backend/data
+    depends_on:
+      # - supabase-db
+      - ollama
+    ports:
+      - 8081:8080
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.webui.rule=Host(`${DOMAIN}`) && PathPrefix(`/webui`)"
+      - "traefik.http.services.webui.loadbalancer.server.port=8080"
+
+  # LLM Infrastructure
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+    networks:
+      - agentic-network
+    # Uncomment for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+  ollama-openai-shim:
+    build: ./openai-api-shim   # path where Dockerfile + app.py live
+    container_name: ollama-openai-shim
+    ports:
+      - "8080:8080"
+    depends_on:
+      - ollama
+    networks:
+      - agentic-network
+  # # Model Router & Load Balancer
+  model-router:
+    build:
+      context: ./model-router
+      dockerfile: Dockerfile
+    container_name: model-router
+    environment:
+      LIGHT_MODEL_ENDPOINT: http://ollama:11434/api/generate
+      HEAVY_MODEL_ENDPOINT: http://ollama:11434/api/generate
+      COMPLEXITY_THRESHOLD: ${COMPLEXITY_THRESHOLD:-0.7}
+    depends_on:
+      - ollama
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.model-router.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/model`)"
+
+  # # Tool Servers
+  mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    container_name: mcp-server
+    environment:
+      MCP_SERVER_PORT: 8000
+      DATABASE_URL: postgres://mcp_user:${MCP_DB_PASSWORD}@supabase-db:5432/mcp
+    volumes:
+      - mcp-data:/app/data
+    depends_on:
+      - supabase-db
+    networks:
+      - agentic-network
+
+  # generic-tool-server:
+  #   build:
+  #     context: ./tool-server
+  #     dockerfile: Dockerfile
+  #   container_name: generic-tool-server
+  #   environment:
+  #     TOOL_SERVER_PORT: 8001
+  #     DATABASE_URL: postgres://tools_user:${TOOLS_DB_PASSWORD}@supabase-db:5432/tools
+  #   volumes:
+  #     - tool-server-data:/app/data
+  #     - ./langchain-code:/app/langchain
+  #   depends_on:
+  #     - supabase-db
+  #   networks:
+  #     - agentic-network
+
+  # # # Agentic Core
+  # agentic-core:
+  #   build:
+  #     context: ./agentic-core
+  #     dockerfile: Dockerfile
+  #   container_name: agentic-core
+  #   environment:
+  #     DATABASE_URL: postgres://agent_user:${AGENT_DB_PASSWORD}@supabase-db:5432/agent
+  #     NEO4J_URI: bolt://neo4j:7687
+  #     NEO4J_USERNAME: neo4j
+  #     NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+  #     MODEL_ROUTER_URL: http://model-router:8000
+  #     MCP_SERVER_URL: http://mcp-server:8000
+  #     TOOL_SERVER_URL: http://generic-tool-server:8001
+  #     GRAFITI_URL: http://grafiti-kg:8000
+  #     N8N_WEBHOOK_URL: http://n8n:5678/webhook
+  #     PROACTIVE_MODE: ${PROACTIVE_MODE:-true}
+  #     THOUGHT_INTERVAL: ${THOUGHT_INTERVAL:-300}
+  #   volumes:
+  #     - agentic-data:/app/data
+  #     - ./langchain-code:/app/langchain
+  #   depends_on:
+  #     - supabase-db
+  #     - neo4j-stack
+  #     - model-router
+  #     # - mcp-server
+  #     # - generic-tool-server
+  #     - graphiti-kg
+  #   networks:
+  #     - agentic-network
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.agentic-core.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/agent`)"
+
+  # Monitoring & Observability
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+    - 9090:9090
+    # - 9091:9091 # Pushgateway (when you need to push metrics instead of having them scraped)
+    # - 9093:9093 # Alertmanager
+    # - 9100:9100 # Node Exporter (for machine metrics)
+    # - 9104:9104 # MySQL Exporter
+    # - 9114:9114 # Elasticsearch Exporter
+    # - 9115:9115 # Blackbox Exporter
+    # - 9182:9182 # SNMP Exporter
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`${DOMAIN}`) && PathPrefix(`/prometheus`)"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    ports:
+      - 3001:3000
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`${DOMAIN}`) && PathPrefix(`/grafana`)"
+
+  # Vector Search & Embeddings
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    volumes:
+      - qdrant-data:/qdrant/storage
+    ports:
+      - "6333:6333"
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.qdrant.rule=Host(`${DOMAIN}`) && PathPrefix(`/qdrant`)"
+
+networks:
+  agentic-network:
+    driver: bridge
+
+volumes:
+  supabase-db-data:
+  neo4j-data:
+  neo4j-logs:
+  neo4j-import:
+  neo4j-plugins:
+  grafiti-data:
+  n8n-data:
+  flowise-data:
+  open-webui-data:
+  ollama-data:
+  mcp-data:
+  tool-server-data:
+  agentic-data:
+  prometheus-data:
+  grafana-data:
+  qdrant-data:
+  db-config:

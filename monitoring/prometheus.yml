@@ -1,0 +1,267 @@
+# monitoring/prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'agentic-core'
+    static_configs:
+      - targets: ['agentic-core:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'model-router'
+    static_configs:
+      - targets: ['model-router:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'tool-server'
+    static_configs:
+      - targets: ['generic-tool-server:8001']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['supabase-db:5432']
+
+  - job_name: 'neo4j'
+    static_configs:
+      - targets: ['neo4j:2004']
+
+  - job_name: 'n8n'
+    static_configs:
+      - targets: ['n8n:5678']
+
+  - job_name: 'ollama'
+    static_configs:
+      - targets: ['ollama:11434']
+
+---
+# monitoring/grafana/datasources/prometheus.yml
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+
+---
+# monitoring/grafana/dashboards/agentic-ai-dashboard.json
+{
+  "dashboard": {
+    "id": null,
+    "title": "Agentic AI Stack Dashboard",
+    "tags": ["agentic", "ai", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(model_router_requests_total[5m])",
+            "legendFormat": "{{model_type}} requests/sec"
+          }
+        ],
+        "xAxis": {
+          "show": true
+        },
+        "yAxes": [
+          {
+            "label": "Requests/sec",
+            "show": true
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Model Response Times",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, model_router_request_duration_seconds_bucket)",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.50, model_router_request_duration_seconds_bucket)",
+            "legendFormat": "50th percentile"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Database Connections",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "pg_stat_database_numbackends{datname=\"agent\"}",
+            "legendFormat": "Active Connections"
+          }
+        ],
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Tool Execution Success Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(tool_executions_success_total[5m]) / rate(tool_executions_total[5m]) * 100",
+            "legendFormat": "Success Rate %"
+          }
+        ],
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 8
+        }
+      },
+      {
+        "id": 5,
+        "title": "Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{name=~\"agentic-core|model-router|ollama\"}",
+            "legendFormat": "{{name}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 12
+        }
+      },
+      {
+        "id": 6,
+        "title": "CPU Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{name=~\"agentic-core|model-router|ollama\"}[5m]) * 100",
+            "legendFormat": "{{name}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 12
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "10s"
+  }
+}
+
+---
+# monitoring/alert_rules.yml
+groups:
+- name: agentic_ai_alerts
+  rules:
+  - alert: HighRequestRate
+    expr: rate(model_router_requests_total[5m]) > 10
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Service {{ $labels.instance }} is down"
+      description: "Service {{ $labels.job }} on {{ $labels.instance }} has been down for more than 1 minute"
+
+  - alert: HighMemoryUsage
+    expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) * 100 > 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High memory usage on {{ $labels.name }}"
+      description: "Memory usage is {{ $value }}%"
+
+  - alert: HighCPUUsage
+    expr: rate(container_cpu_usage_seconds_total[5m]) * 100 > 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU usage on {{ $labels.name }}"
+      description: "CPU usage is {{ $value }}%" "High request rate detected"
+      description: "Request rate is {{ $value }} requests/second"
+
+  - alert: ModelResponseTimeHigh
+    expr: histogram_quantile(0.95, model_router_request_duration_seconds_bucket) > 30
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Model response times are high"
+      description: "95th percentile response time is {{ $value }}s"
+
+  - alert: DatabaseConnectionsHigh
+    expr: pg_stat_database_numbackends > 50
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High number of database connections"
+      description: "{{ $value }} active connections to database"
+
+  - alert: ToolExecutionFailureRate
+    expr: rate(tool_executions_failed_total[5m]) / rate(tool_executions_total[5m]) > 0.1
+    for: 3m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High tool execution failure rate"
+      description: "Tool failure rate is {{ $value * 100 }}%"
+ 
+    - alert: ServiceDown
+      expr: up == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Service {{ $labels.job }} on {{ $labels.instance }} is down"
+        description: "The service {{ $labels.job }} on {{ $labels.instance }} has been unreachable for more than 1 minute."
+  

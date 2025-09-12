@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Knowledge Graph Processor & Visualizer (Improved NER & Temporal Linking)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        /* (kept your original styles) */
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: gradient 3s ease infinite;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .input-section, .options-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        textarea {
+            width: 100%;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            color: white;
+            font-size: 14px;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+        textarea::placeholder { color: rgba(255,255,255,0.7); }
+        button {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border: none;
+            color: white;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .viz-container { background: rgba(255,255,255,0.1); border-radius: 15px; padding: 20px; margin-top: 20px; border: 1px solid rgba(255,255,255,0.2); }
+        #graph { width: 100%; height: 600px; background: rgba(0,0,0,0.2); border-radius: 10px; border: 2px solid rgba(255,255,255,0.1); }
+        .node { cursor: pointer; transition: all 0.3s ease; }
+        .node:hover { stroke-width: 4px; filter: brightness(1.3); }
+        .link { fill: none; stroke-opacity: 0.6; transition: all 0.3s ease; }
+        .link:hover { stroke-opacity: 1; stroke-width: 3px; }
+        .node-label { text-anchor: middle; fill: white; font-size: 12px; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); pointer-events: none; }
+        .tooltip { position: absolute; background: rgba(0,0,0,0.9); color: white; padding: 10px; border-radius: 5px; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(255,255,255,0.3); z-index: 1000; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 20px; }
+        .stat-card { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; text-align: center; border: 1px solid rgba(255,255,255,0.2); }
+        .stat-number { font-size: 2em; font-weight: bold; color: #4ecdc4; }
+        .processing-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .option-card { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2); text-align: center; cursor: pointer; }
+        .option-card.active { background: rgba(76,175,80,0.3); border-color: #4caf50; }
+        .tooltip { position: absolute; background: rgba(0,0,0,0.9); color: white; padding: 10px; border-radius: 5px; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity 0.3s; border: 1px solid rgba(255,255,255,0.3); z-index: 1000; }
+        @keyframes gradient { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+        @media (max-width: 768px) { .controls { grid-template-columns: 1fr; } .processing-options { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧠 Knowledge Graph Processor & Visualizer</h1>
+        <div class="controls">
+            <div class="input-section">
+                <h3>📝 Input Data</h3>
+                <textarea id="textInput" placeholder="Enter your text data here to extract entities and relationships...
+
+Example:
+Apple Inc. was founded by Steve Jobs in 1976. The company is headquartered in Cupertino, California. Tim Cook became CEO in 2011 after Steve Jobs. Apple develops the iPhone, iPad, and Mac computers."></textarea>
+                <br>
+                <button onclick="processText()">🔄 Process Text into Knowledge Graph</button>
+                <button onclick="loadSampleData()">📊 Load Sample Data</button>
+            </div>
+
+            <div class="options-section">
+                <h3>⚙️ Processing Options</h3>
+                <div class="processing-options">
+                    <div class="option-card active" onclick="toggleOption(this, 'entities')">
+                        <strong>Entity Extraction</strong>
+                        <p>Extract people, places, organizations</p>
+                    </div>
+                    <div class="option-card active" onclick="toggleOption(this, 'relationships')">
+                        <strong>Relationship Detection</strong>
+                        <p>Find connections between entities</p>
+                    </div>
+                    <div class="option-card active" onclick="toggleOption(this, 'temporal')">
+                        <strong>Temporal Analysis</strong>
+                        <p>Link dates and nearest neighbors</p>
+                    </div>
+                    <div class="option-card" onclick="toggleOption(this, 'semantic')">
+                        <strong>Semantic Grouping</strong>
+                        <p>Group similar concepts</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="viz-container">
+            <h3>🎯 Knowledge Graph Visualization</h3>
+            <div id="graph"></div>
+
+            <div class="stats">
+                <div class="stat-card"><div class="stat-number" id="nodeCount">0</div><div>Entities</div></div>
+                <div class="stat-card"><div class="stat-number" id="linkCount">0</div><div>Relationships</div></div>
+                <div class="stat-card"><div class="stat-number" id="centralityScore">0</div><div>Most Connected</div></div>
+                <div class="stat-card"><div class="stat-number" id="clusters">0</div><div>Clusters</div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+<script>
+let currentData = { nodes: [], links: [] };
+let simulation;
+let svg;
+let processingOptions = { entities: true, relationships: true, temporal: false, semantic: false };
+
+// -------------------- Toggle Options --------------------
+function toggleOption(element, option) {
+    element.classList.toggle('active');
+    processingOptions[option] = element.classList.contains('active');
+}
+
+// -------------------- Sample Data --------------------
+function loadSampleData() {
+    const sampleText = `Apple Inc. was founded by Steve Jobs and Steve Wozniak in 1976. The company is headquartered in Cupertino, California. Tim Cook became CEO in 2011. Apple develops the iPhone, iPad, and Mac computers. Microsoft was founded by Bill Gates and Paul Allen in 1975. Microsoft is headquartered in Redmond, Washington. Satya Nadella is the current CEO. Google was founded by Larry Page and Sergey Brin in 1998. Google is now part of Alphabet Inc.`;
+    document.getElementById('textInput').value = sampleText;
+    processText();
+}
+
+// -------------------- Text Processing --------------------
+function processText() {
+    const text = document.getElementById('textInput').value;
+    if (!text.trim()) return;
+
+    const entities = extractEntities(text);
+
+    // Build nodes
+    const nodes = entities.map((entity, i) => ({
+        id: `node-${i}`,
+        name: entity.name,
+        type: entity.type,
+        group: getGroupByType(entity.type),
+        size: Math.random() * 20 + 15,
+        value: entity.value || null
+    }));
+
+    const relationships = extractRelationships(text, entities);
+
+    // Build links
+    const links = [];
+    relationships.forEach(rel => {
+        links.push({
+            source: `node-${rel.source}`,
+            target: `node-${rel.target}`,
+            type: rel.type,
+            strength: Math.random() * 0.8 + 0.2
+        });
+    });
+
+    // Temporal linking for years
+    const yearNodes = nodes.filter(n => n.type === "year").sort((a,b)=>parseInt(a.name)-parseInt(b.name));
+    for (let i = 0; i < yearNodes.length-1; i++) {
+        links.push({ source: yearNodes[i].id, target: yearNodes[i+1].id, type: "chronological", strength: 0.1 });
+    }
+
+    currentData = { nodes, links };
+    updateVisualization();
+    updateStats();
+}
+
+// -------------------- Entity Extraction --------------------
+function extractEntities(text) {
+    const entities = [];
+    const patterns = {
+        company: /\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)*(?: Inc\.| Corporation| Corp\.| Company| Ltd\.))\b/g,
+        person: /\b([A-Z][a-z]+ [A-Z][a-z]+)\b/g,
+        location: /\b([A-Z][a-z]+, [A-Z][a-z]+)\b/g,
+        technology: /\b(iPhone|iPad|Mac|Windows|Android|iOS)\b/g,
+        year: /\b(19\d{2}|20\d{2})\b/g
+    };
+
+    for (const [type, pattern] of Object.entries(patterns)) {
+        let match;
+        while ((match = pattern.exec(text)) !== null) {
+            const name = match[1] || match[0];
+            if (!entities.some(e => e.name === name)) {
+                entities.push({ name, type: type==="year"?"year":type, value: type==="year"?name:undefined });
+            }
+        }
+    }
+
+    const keywords = { 'CEO': 'role', 'founder': 'role', 'headquarters': 'location_type', 'university': 'institution', 'theory': 'concept' };
+    for (const [keyword,type] of Object.entries(keywords)) {
+        if(text.toLowerCase().includes(keyword.toLowerCase()) && !entities.some(e=>e.name===keyword)) {
+            entities.push({ name: keyword, type });
+        }
+    }
+
+    return entities;
+}
+
+// -------------------- Relationship Extraction --------------------
+function extractRelationships(text, entities) {
+    const relationships = [];
+    const sentences = text.split(/[.!?]+/);
+
+    sentences.forEach(sentence => {
+        const entitiesInSentence = entities.filter(e => sentence.toLowerCase().includes(e.name.toLowerCase()));
+        const companies = entitiesInSentence.filter(e => e.type === 'company');
+        const people = entitiesInSentence.filter(e => e.type === 'person');
+        const technologies = entitiesInSentence.filter(e => e.type === 'technology');
+        const years = entitiesInSentence.filter(e => e.type === 'year');
+
+        // Company -> leadership
+        companies.forEach(company => {
+            people.forEach(person => {
+                if(/CEO|founder|co-founder|became|appointed|founded/i.test(sentence)) {
+                    const sourceIdx = entities.indexOf(company);
+                    const targetIdx = entities.indexOf(person);
+                    if(sourceIdx!==-1 && targetIdx!==-1) relationships.push({ source: sourceIdx, target: targetIdx, type: 'leads' });
+                }
+            });
+            // Company -> technologies
+            technologies.forEach(tech => {
+                const sourceIdx = entities.indexOf(company);
+                const targetIdx = entities.indexOf(tech);
+                if(sourceIdx!==-1 && targetIdx!==-1) relationships.push({ source: sourceIdx, target: targetIdx, type: 'develops' });
+            });
+            // Company -> year
+            years.forEach(year => {
+                if(/founded/i.test(sentence)) {
+                    const sourceIdx = entities.indexOf(company);
+                    const targetIdx = entities.indexOf(year);
+                    if(sourceIdx!==-1 && targetIdx!==-1) relationships.push({ source: sourceIdx, target: targetIdx, type: 'founded_in' });
+                }
+            });
+        });
+
+        // General co-occurrence
+        for(let i=0;i<entitiesInSentence.length;i++){
+            for(let j=i+1;j<entitiesInSentence.length;j++){
+                const sIdx = entities.indexOf(entitiesInSentence[i]);
+                const tIdx = entities.indexOf(entitiesInSentence[j]);
+                if(sIdx===-1||tIdx===-1) continue;
+                if(relationships.some(r=>(r.source===sIdx && r.target===tIdx)||(r.source===tIdx && r.target===sIdx))) continue;
+                relationships.push({ source:sIdx, target:tIdx, type:'related' });
+            }
+        }
+    });
+
+    return relationships;
+}
+
+function getGroupByType(type){
+    const map={ person:1, company:2, location:3, technology:4, year:5, role:6, concept:7, institution:8 };
+    return map[type]||0;
+}
+
+// -------------------- Visualization --------------------
+function updateVisualization() {
+    d3.select("#graph").select("svg").remove();
+    const container = d3.select("#graph");
+    const width = container.node().clientWidth||800;
+    const height = container.node().clientHeight||600;
+    svg = container.append("svg").attr("width",width).attr("height",height);
+    const zoomLayer = svg.append("g");
+    svg.call(d3.zoom().scaleExtent([0.3,3]).on("zoom", event => zoomLayer.attr("transform", event.transform)));
+    const color = d3.scaleOrdinal().domain([0,1,2,3,4,5,6,7,8]).range(['#ff6b6b','#4ecdc4','#45b7d1','#96ceb4','#feca57','#ff9ff3','#54a0ff','#5f27cd','#00d2d3']);
+
+    simulation = d3.forceSimulation(currentData.nodes)
+        .force("link", d3.forceLink(currentData.links).id(d=>d.id).distance(80))
+        .force("charge", d3.forceManyBody().strength(-400))
+        .force("center", d3.forceCenter(width/2,height/2))
+        .force("collision", d3.forceCollide().radius(d=>d.size+5));
+
+    const link = zoomLayer.append("g").attr("stroke","#999").attr("stroke-opacity",0.6)
+        .selectAll("line").data(currentData.links).join("line")
+        .attr("stroke-width", d=>Math.sqrt(d.strength*5)+1)
+        .on("mouseover", (event,d)=>{ 
+            const sName=currentData.nodes.find(n=>n.id===d.source.id)?.name||'Unknown';
+            const tName=currentData.nodes.find(n=>n.id===d.target.id)?.name||'Unknown';
+            showTooltip(event, `${d.type}: ${sName} → ${tName}`);
+        }).on("mouseout", hideTooltip);
+
+    const node = zoomLayer.append("g").attr("stroke","#fff").attr("stroke-width",2)
+        .selectAll("circle").data(currentData.nodes).join("circle")
+        .attr("r",d=>d.size)
+        .attr("fill",d=>color(d.group))
+        .on("mouseover",(event,d)=>showTooltip(event, `${d.name} (${d.type})`))
+        .on("mouseout",hideTooltip)
+        .call(d3.drag().on("start",dragstarted).on("drag",dragged).on("end",dragended));
+
+    const labels = zoomLayer.append("g").selectAll("text").data(currentData.nodes).join("text")
+        .attr("class","node-label").attr("dy","0.31em")
+        .text(d=>d.name.length>12?d.name.substring(0,12)+"...":d.name);
+
+    simulation.on("tick", ()=>{
+        link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y)
+            .attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+        node.attr("cx",d=>(d.x=Math.max(d.size,Math.min(width-d.size,d.x))))
+            .attr("cy",d=>(d.y=Math.max(d.size,Math.min(height-d.size,d.y))));
+        labels.attr("x",d=>d.x).attr("y",d=>d.y);
+    });
+
+    function dragstarted(event,d){ if(!event.active) simulation.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; }
+    function dragged(event,d){ d.fx=event.x; d.fy=event.y; }
+    function dragended(event,d){ if(!event.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; }
+}
+
+// -------------------- Tooltip --------------------
+function showTooltip(event,text){
+    const tooltip=document.getElementById('tooltip');
+    tooltip.style.opacity=1;
+    tooltip.style.left=(event.pageX+10)+'px';
+    tooltip.style.top=(event.pageY-10)+'px';
+    tooltip.textContent=text;
+}
+function hideTooltip(){ document.getElementById('tooltip').style.opacity=0; }
+
+// -------------------- Stats --------------------
+function updateStats(){
+    document.getElementById('nodeCount').textContent=currentData.nodes.length;
+    document.getElementById('linkCount').textContent=currentData.links.length;
+
+    const connections={};
+    currentData.links.forEach(link=>{
+        const sId=typeof link.source==='object'?link.source.id:link.source;
+        const tId=typeof link.target==='object'?link.target.id:link.target;
+        connections[sId]=(connections[sId]||0)+1;
+        connections[tId]=(connections[tId]||0)+1;
+    });
+    document.getElementById('centralityScore').textContent=Math.max(...Object.values(connections),0);
+
+    const visited=new Set();
+    let clusters=0;
+    currentData.nodes.forEach(node=>{ if(!visited.has(node.id)){ clusters++; dfs(node.id,visited,currentData.links); } });
+    document.getElementById('clusters').textContent=clusters;
+}
+function dfs(nodeId, visited, links){
+    visited.add(nodeId);
+    links.forEach(link=>{
+        const sId=typeof link.source==='object'?link.source.id:link.source;
+        const tId=typeof link.target==='object'?link.target.id:link.target;
+        if(sId===nodeId && !visited.has(tId)) dfs(tId,visited,links);
+        else if(tId===nodeId && !visited.has(sId)) dfs(sId,visited,links);
+    });
+}
+
+// -------------------- Init --------------------
+window.addEventListener('load',()=>{ setTimeout(loadSampleData,1000); });
+window.addEventListener('resize',()=>{ if(currentData.nodes.length>0) updateVisualization(); });
+</script>
+
+</body>
+</html>
