@@ -1,11 +1,24 @@
 CREATE ROLE n8n_user WITH LOGIN PASSWORD 'your_secure_n8n_password';
-CREATE DATABASE n8n OWNER n8n_user;
-
 CREATE ROLE webui_user WITH LOGIN PASSWORD 'your_secure_webui_password';
-CREATE DATABASE webui OWNER webui_user;
 
-CREATE ROLE postgres WITH LOGIN PASSWORD 'your_secure_supabase_password';
-CREATE DATABASE postgres OWNER postgres;
+CREATE SCHEMA n8n AUTHORIZATION n8n_user;
+CREATE SCHEMA webui AUTHORIZATION webui_user;
+
+GRANT USAGE ON SCHEMA n8n TO n8n_user;
+GRANT CREATE ON SCHEMA n8n TO n8n_user;
+
+GRANT USAGE ON SCHEMA webui TO webui_user;
+GRANT CREATE ON SCHEMA webui TO webui_user;
+
+
+-- CREATE ROLE n8n_user WITH LOGIN PASSWORD 'your_secure_n8n_password';
+-- CREATE DATABASE n8n OWNER n8n_user;
+
+-- CREATE ROLE webui_user WITH LOGIN PASSWORD 'your_secure_webui_password';
+-- CREATE DATABASE webui OWNER webui_user;
+
+-- CREATE ROLE postgres WITH LOGIN PASSWORD 'your_secure_supabase_password';
+-- CREATE DATABASE postgres OWNER postgres;
 -- -- ----------------------------
 -- -- 01_create_databases.sql
 -- -- ----------------------------
