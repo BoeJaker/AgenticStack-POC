@@ -3,7 +3,7 @@
 A comprehensive, self-hosted agentic AI system with knowledge graph memory, proactive thinking, and multi-modal capabilities.
 
 ## 🏗️ Architecture Overview
-
+![Architecture](images/API-Shim.jpg)
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Agentic AI Stack                         │
@@ -361,5 +361,6 @@ For issues and questions:
 4. Join community discussions
 
 ---
+
 
 **Built for the future of autonomous AI systems** 🤖✨
