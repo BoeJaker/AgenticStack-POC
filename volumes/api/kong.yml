@@ -22,7 +22,7 @@ acls:
   - consumer: service_role
     group: admin
 
-###
+### 
 ### Dashboard credentials
 ###
 basicauth_credentials:
@@ -225,17 +225,46 @@ services:
           allow:
             - admin
 
-  ## Protected Dashboard - catch all remaining routes
-  - name: dashboard
-    _comment: 'Studio: /* -> http://studio:3000/*'
+  # ## Protected Dashboard - catch all remaining routes
+  # - name: dashboard
+  #   _comment: 'Studio: /* -> http://studio:3000/*'
+  #   url: http://studio:54321/
+  #   routes:
+  #     - name: dashboard-all
+  #       strip_path: true
+  #       paths:
+  #         - /
+  #   plugins:
+  #     - name: cors
+  #     - name: basic-auth
+  #       config:
+  #         hide_credentials: true
+  #     - name: request-transformer
+  #       config:
+  #         add:
+  #           headers:
+  #             - "X-Forwarded-Host: llm.int"
+  #             - "X-Forwarded-Proto: http"
+  
+  # - name: api
+  #   url: http://supabase-rest:8000
+  #   routes:
+  #     - name: studio-rest
+  #       paths:
+  #         - /rest/v1
+  #       strip_path: false
+  #     - name: studio-auth
+  #       paths:
+  #         - /auth/v1
+  #       strip_path: false
+  #     - name: studio-storage
+  #       paths:
+  #         - /storage/v1
+  #       strip_path: false
+  - name: studio-api
     url: http://studio:3000/
     routes:
-      - name: dashboard-all
+      - name: studio-api-all
         strip_path: true
         paths:
-          - /
-    plugins:
-      - name: cors
-      - name: basic-auth
-        config:
-          hide_credentials: true
+          - /api/v1/
