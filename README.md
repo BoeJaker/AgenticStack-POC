@@ -8,7 +8,7 @@ A comprehensive, self-hosted agentic AI system with knowledge graph memory, proa
 ![Stack-Architecture](images/Stack.jpeg)
 
 ### Agent Architecture
-![Agent-Architecture](images/API-Shim.jpg)
+![Agent-Architecture](images/architecture.svg)
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Agentic AI Stack                         │
@@ -369,4 +369,5 @@ For issues and questions:
 
 
 **Built for the future of autonomous AI systems** 🤖✨
+
 
