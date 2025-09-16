@@ -1,0 +1,26 @@
+groups:
+  - name: infrastructure
+    rules:
+      - alert: ContainerDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.instance }} is down"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is down"

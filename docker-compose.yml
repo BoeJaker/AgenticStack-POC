@@ -863,6 +863,161 @@ services:
     networks:
       - agentic-network
 
+# =============================================================================
+  # AI MULTIMODAL SERVICES - Vision, Audio, and Document Processing
+  # Advanced AI services for handling different types of media and content
+  # =============================================================================
+
+  # Stable Diffusion - Text-to-Image Generation
+  # Generates high-quality images from text prompts using diffusion models
+  # Provides web interface for interactive image creation and editing
+  stable-diffusion:
+    image: ghcr.io/ashawkey/stable-diffusion-webui-cpu:latest
+    container_name: stable-diffusion
+    restart: unless-stopped
+    ports:
+      - "7860:7860"                                 # Web interface
+    volumes:
+      - ./volumes/ai-services/stable-diffusion:/data  # Model storage and generated images
+    environment:
+      CLI_ARGS: --listen --port 7860 --no-half --use-cpu all  # CPU-optimized settings
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.stable-diffusion.rule=Host(`${DOMAIN}`) && PathPrefix(`/sd`)"
+      - "traefik.http.middlewares.sd-stripprefix.stripprefix.prefixes=/sd"
+      - "traefik.http.routers.stable-diffusion.middlewares=sd-stripprefix"
+      - "traefik.http.services.stable-diffusion.loadbalancer.server.port=7860"
+
+  # BLIP - Image Understanding and Captioning
+  # Generates descriptive captions for images using vision-language models
+  # Provides API for automated image analysis and content description
+  blip:
+    image: ghcr.io/suno-ai/blip:latest
+    container_name: blip
+    restart: unless-stopped
+    ports:
+      - "8001:8000"                                # REST API endpoint
+    volumes:
+      - ./volumes/ai-services/blip:/app/data       # Processing cache and models
+    command: >
+      python -m uvicorn blip_api:app --host 0.0.0.0 --port 8000
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.blip.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/blip`)"
+      - "traefik.http.services.blip.loadbalancer.server.port=8000"
+
+  # YOLOv8 - Real-time Object Detection
+  # Detects and classifies objects in images and video streams
+  # Provides bounding boxes, confidence scores, and class labels
+  yolov8:
+    image: ultralytics/ultralytics:latest
+    container_name: yolov8
+    restart: unless-stopped
+    ports:
+      - "8003:8000"                                # Detection API
+    command: >
+      uvicorn ultralytics.server:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./volumes/ai-services/yolov8:/data         # Model weights and detection cache
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.yolov8.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/detect`)"
+      - "traefik.http.services.yolov8.loadbalancer.server.port=8000"
+
+  # PaddleOCR - Optical Character Recognition
+  # Extracts text from images and documents with high accuracy
+  # Supports multiple languages and document formats
+  paddleocr:
+    image: ghcr.io/paddlepaddle/paddleocr:latest
+    container_name: paddleocr
+    restart: unless-stopped
+    ports:
+      - "8004:8080"                               # OCR processing API
+    volumes:
+      - ./volumes/ai-services/paddleocr:/app/data # OCR models and processing cache
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.paddleocr.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/ocr`)"
+      - "traefik.http.services.paddleocr.loadbalancer.server.port=8080"
+
+  # Whisper - Speech-to-Text Transcription
+  # Converts audio files and streams to text with high accuracy
+  # Supports multiple languages and handles various audio formats
+  whisper:
+    image: ghcr.io/go-skynet/whisper-cpu:latest
+    container_name: whisper
+    restart: unless-stopped
+    ports:
+      - "8005:8000"                               # Transcription API
+    environment:
+      WHISPER_MODEL: base                         # Model size (tiny/base/small/medium/large)
+    volumes:
+      - ./volumes/ai-services/whisper:/app/data   # Model cache and audio processing
+    command: >
+      python -m faster_whisper.server --model $WHISPER_MODEL --host 0.0.0.0 --port 8000
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whisper.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/stt`)"
+      - "traefik.http.services.whisper.loadbalancer.server.port=8000"
+
+  # Piper - Text-to-Speech Synthesis
+  # Converts text to natural-sounding speech with various voice options
+  # High-quality neural TTS with low latency for real-time applications
+  piper:
+    image: rhasspy/piper:latest
+    container_name: piper
+    restart: unless-stopped
+    ports:
+      - "8006:8000"                               # TTS synthesis API
+    volumes:
+      - ./volumes/ai-services/piper:/data         # Voice models and audio cache
+    command: >
+      piper --server --host 0.0.0.0 --port 8000
+    networks:
+      - agentic-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.piper.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/tts`)"
+      - "traefik.http.services.piper.loadbalancer.server.port=8000"
+
+  # Text Embeddings Inference - Semantic Search Engine
+  # Converts text to high-dimensional vectors for similarity search
+  # Optimized for fast inference with sentence transformer models
+  text-embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    container_name: text-embeddings
+    restart: unless-stopped
+    ports:
+      - "8007:80"                                 # Embeddings API
+    environment:
+      MODEL_ID: sentence-transformers/all-MiniLM-L6-v2  # Lightweight but effective model
+      MAX_BATCH_REQUESTS: 32                      # Batch processing optimization
+      MAX_CONCURRENT_REQUESTS: 128               # Concurrent request handling
+    volumes:
+      - ./volumes/ai-services/embeddings:/data   # Model cache and embeddings storage
+    networks:
+      - agentic-network
+    # Health check to ensure service is ready
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.embeddings.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/embeddings`)"
+      - "traefik.http.services.embeddings.loadbalancer.server.port=80"
+
   # Model Router & Load Balancer
   # Intelligent request routing between different model sizes based on complexity
   # Routes simple queries to fast models, complex queries to powerful models
@@ -1035,26 +1190,63 @@ services:
   # Loki - Log aggregation system
   # Horizontally scalable, multi-tenant log aggregation
   # Works seamlessly with Grafana for log visualization
-  loki:
+   loki:
     image: grafana/loki:2.9.0
+    container_name: loki
+    volumes:
+      - ./monitoring/loki/loki-config.yaml:/etc/loki/local-config.yaml
+      - loki-data:/loki
     ports:
       - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
     networks:
       - agentic-network
 
   # Promtail - Log collection agent
   # Collects logs from files and Docker containers
-  # Ships logs to Loki for centralized storage and analysis
+  # Ships logs to Loki for centralized storage and analysis  # Update Promtail with proper configuration
   promtail:
     image: grafana/promtail:2.9.0
+    container_name: promtail
     volumes:
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro  # Docker container logs
-      - /var/log:/var/log:ro                        # System logs
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/var/log:ro
+      - ./monitoring/promtail/config.yaml:/etc/promtail/config.yaml
     command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki
     networks:
       - agentic-network
 
+  # System metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9100:9100"
+    networks:
+      - agentic-network
+
+  # PostgreSQL metrics
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://supabase_admin:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      - supabase-db
+    networks:
+      - agentic-network
   # =============================================================================
   # DEVELOPMENT & TUNNELING TOOLS
   # =============================================================================
@@ -1110,7 +1302,8 @@ volumes:
   # Monitoring volumes
   prometheus-data:                               # Metrics time-series data
   grafana-data:                                  # Dashboards and user preferences
-  
+  loki-data:
+
   # Vector database volumes
   qdrant-data:                                   # Vector embeddings storage
   chroma_data:                                   # ChromaDB vector storage
