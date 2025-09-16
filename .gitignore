@@ -1,2 +1,6 @@
 .notes.md
 venv/*
+letsencrypt/*
+traefik/.*.crt
+traefik/.*.key
+.env

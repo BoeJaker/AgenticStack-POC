@@ -16,6 +16,12 @@ scrape_configs:
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
+  
+  - job_name: 'ollama'
+    static_configs:
+      - targets: ['ollama:11434']
+    metrics_path: '/metrics'
+    scrape_interval: 1m
 
   - job_name: 'agentic-core'
     static_configs:
@@ -47,9 +53,9 @@ scrape_configs:
     static_configs:
       - targets: ['n8n:5678']
 
-  - job_name: 'ollama'
-    static_configs:
-      - targets: ['ollama:11434']
+  # - job_name: 'ollama'
+  #   static_configs:
+  #     - targets: ['ollama:11434']
 
 ---
 # monitoring/grafana/datasources/prometheus.yml

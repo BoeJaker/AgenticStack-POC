@@ -1,0 +1,39 @@
+name: Local Agent
+version: 1.0.0
+schema: v1
+models:
+  - name: Gemma 3 12B
+    provider: ollama
+    model: gemma3:12b
+    apiBase: http://llm.int:11435
+    roles:
+      - chat
+      - embed
+      - edit
+      - apply
+      - autocomplete
+  - name: GPT-oss
+    provider: ollama
+    model: gpt-oss:20b
+    apiBase: http://llm.int:11435
+    roles:
+      - chat
+      - edit
+      - apply
+  - name: Nomic Embed
+    provider: ollama
+    model: nomic-embed-text:latest
+    roles:
+      - embed
+
+  - name: Autodetect
+    provider: ollama
+    model: AUTODETECT
+context:
+  - provider: code
+  - provider: docs
+  - provider: diff
+  - provider: terminal
+  - provider: problems
+  - provider: folder
+  - provider: codebase

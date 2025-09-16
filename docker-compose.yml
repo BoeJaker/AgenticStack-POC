@@ -17,18 +17,33 @@ services:
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=you@example.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+
+      # - "--entrypoints.websecure.http.tls=true"
+      # - "--entrypoints.websecure.http.tls.certificates[0].certFile=/certs/llm.int.crt"
+      # - "--entrypoints.websecure.http.tls.certificates[0].keyFile=/certs/llm.int.key"
     ports:
       - "80:80"
       - "443:443"
-      - "8083:8083"
+      - "8083:8080"
     volumes:
+      - "./letsencrypt:/letsencrypt"
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/llm.int.crt:/certs/llm.int.crt
+      - ./traefik/llm.int.key:/certs/llm.int.key
+ 
     networks:
       - agentic-network
       
   ##################
   #    Supabase    #
   ##################
+
+  # --------------------
+  # Supabase Studio (Frontend)
+  # --------------------
   studio:
     container_name: supabase-studio
     image: supabase/studio:2025.06.30-sha-6f5982d
@@ -74,6 +89,10 @@ services:
       - 54321:3000
     networks:
       - agentic-network
+
+  # --------------------
+  # API Gateway (Kong)
+  # --------------------
   kong:
     container_name: supabase-kong
     image: kong:2.8.1
@@ -103,6 +122,10 @@ services:
     entrypoint: bash -c 'eval "echo \"$$(cat ~/temp.yml)\"" > ~/kong.yml && /docker-entrypoint.sh kong docker-start'
     networks:
       - agentic-network
+
+  # --------------------
+  # Auth Layer (GoTrue)
+  # --------------------
   auth:
     container_name: supabase-auth
     image: supabase/gotrue:v2.177.0
@@ -189,6 +212,10 @@ services:
       # GOTRUE_HOOK_SEND_EMAIL_SECRETS: "v1,whsec_VGhpcyBpcyBhbiBleGFtcGxlIG9mIGEgc2hvcnRlciBCYXNlNjQgc3RyaW5n"
     networks:
       - agentic-network
+      
+  # --------------------
+  # REST Layer (PostgREST)
+  # --------------------
   rest:
     container_name: supabase-rest
     image: postgrest/postgrest:v12.2.12
@@ -213,6 +240,9 @@ services:
       ]
     networks:
       - agentic-network
+  
+
+
   realtime:
     # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
     container_name: realtime-dev.supabase-realtime
@@ -421,8 +451,12 @@ services:
       # GOOGLE_PROJECT_NUMBER: ${GOOGLE_PROJECT_NUMBER}
     networks:
       - agentic-network
+  
+   # --------------------
+   # Database Layer
+   # --------------------
 
-# Comment out everything below this point if you are using an external Postgres database
+  # Comment out everything below this point if you are using an external Postgres database
   supabase-db:
     container_name: supabase-db
     image: supabase/postgres:15.8.1.060
@@ -563,115 +597,54 @@ services:
       ]
     networks:
       - agentic-network
+      
+  # - --------------------
+  # Vector Databases
+  # --------------------
+  chroma:
+    image: chromadb/chroma:1.0.22.dev17
+    container_name: chroma
+    ports:
+      - "8008:8000"
+    environment:
+      CHROMA_DB_IMPL: sqlite
+      CHROMA_SERVER_HOST: 0.0.0.0
 
+      # Tell Chroma to use an external embedding function
+      CHROMA_DEFAULT_EMBEDDING_FUNCTION: ollama
+      OLLAMA_API_BASE: http://ollama:11435  # internal Docker network reference
+      OLLAMA_MODEL: "nomic-embed-text"      # or whichever Ollama model you pulled
 
-  # # --------------------
-  # # Database Layer
-  # # --------------------
-  # supabase-db:
-  #   image: supabase/postgres:15.1.0.117
-  #   container_name: supabase-db
-  #   environment:
-  #     POSTGRES_DB: postgres
-  #     POSTGRES_USER: supabase_admin
-  #     POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
-  #     JWT_SECRET: ${JWT_SECRET}
-  #     JWT_EXP: 3600
-  #   volumes:
-  #     - supabase-db-data:/var/lib/postgresql/data
-  #     - ./supabase/init:/docker-entrypoint-initdb.d
-  #   ports:
-  #     - "5432:5432"
-  #   networks:
-  #     - agentic-network
-  #   command: >
-  #     postgres 
-  #     -c config_file=/etc/postgresql/postgresql.conf
-  #     -c log_min_messages=fatal
-  #     -c shared_preload_libraries=vector
+    volumes:
+      - chroma_data:/chroma/db 
 
-  # # --------------------
-  # # Auth Layer (GoTrue)
-  # # --------------------
-  # supabase-auth:
-  #   image: supabase/gotrue:v2.99.0
-  #   container_name: supabase-auth
-  #   depends_on:
-  #     - supabase-db
-  #   environment:
-  #     GOTRUE_API_HOST: 0.0.0.0
-  #     GOTRUE_API_PORT: 9999
-  #     GOTRUE_DB_DRIVER: postgres
-  #     GOTRUE_DB_DATABASE_URL: postgres://supabase_admin:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
-  #     GOTRUE_SITE_URL: ${SITE_URL}
-  #     GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
-  #     GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}
-  #     GOTRUE_JWT_SECRET: ${JWT_SECRET}
-  #   networks:
-  #     - agentic-network
-  #   labels:
-  #     - "traefik.enable=true"
-  #     - "traefik.http.routers.supabase-auth.rule=Host(`${DOMAIN}`) && PathPrefix(`/auth/v1`)"
-  #     - "traefik.http.services.supabase-auth.loadbalancer.server.port=9999"
+  weaviate:
+    image: semitechnologies/weaviate:1.19.3
+    container_name: weaviate
+    ports:
+      - "8010:8080"   # REST API
+      - "8009:8081"   # gRPC
+    environment:
+      QUERY_DEFAULTS_LIMIT: 20
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
 
-  # # --------------------
-  # # REST Layer (PostgREST)
-  # # --------------------
-  # supabase-rest:
-  #   image: postgrest/postgrest:v11.2.0
-  #   container_name: supabase-rest
-  #   depends_on:
-  #     - supabase-db
-  #   environment:
-  #     PGRST_DB_URI: postgres://supabase_admin:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
-  #     PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}  # default to public if not set
-  #     PGRST_DB_ANON_ROLE: anon
-  #     PGRST_JWT_SECRET: ${JWT_SECRET}
-  #     PGRST_DB_USE_LEGACY_GUCS: "false"
-  #   networks:
-  #     - agentic-network
-  #   labels:
-  #     - "traefik.enable=true"
-  #     - "traefik.http.routers.supabase-rest.rule=Host(`${DOMAIN}`) && PathPrefix(`/rest/v1`)"
-  #     - "traefik.http.services.supabase-rest.loadbalancer.server.port=3000"
+      # # Enable Ollama instead of OpenAI
+      # DEFAULT_VECTORIZER_MODULE: text2vec-ollama
+      # ENABLE_MODULES: text2vec-ollama
 
-  # # --------------------
-  # # API Gateway (Kong)
-  # # --------------------
-  # supabase-kong-studio:
-  #   image: kong:2.1
-  #   container_name: supabase-kong-studio
-  #   environment:
-  #     KONG_DATABASE: "off"
-  #     KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
-  #     KONG_DNS_ORDER: LAST,A,CNAME
-  #   volumes:
-  #     - ./supabase/kong.yml:/var/lib/kong/kong.yml:ro
-  #   ports:
-  #     - "8000:8000"   # API Gateway
-  #     - "8443:8443"   # TLS (optional)
-  #   networks:
-  #     - agentic-network
+      # # Ollama connection
+      # OLLAMA_URL: http://ollama:11435
+      # OLLAMA_MODEL: nomic-embed-text:latest   # or another embedding model you pulled into Ollama
 
-  # # --------------------
-  # # Supabase Studio (Frontend)
-  # # --------------------
-  # supabase-studio:
-  #   image: supabase/studio:v0.1.0
-  #   container_name: supabase-studio
-  #   depends_on:
-  #     - supabase-kong-studio
-  #   environment:
-  #     SUPABASE_URL: http://supabase-kong-studio:8000
-  #     SUPABASE_PUBLIC_URL: http://localhost:54321
-  #     SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}       # must match JWT_SECRET
-  #     SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY} # must match service role
-  #   ports:
-  #     - "54321:3000"
-  #   networks:
-  #     - agentic-network
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    networks:
+      - agentic-network
 
+  # - --------------------
   # Graph Databases
+  # --------------------
   neo4j-stack:
     image: neo4j:5.13-community
     container_name: neo4j-stack
@@ -739,9 +712,10 @@ services:
       N8N_SECURE_COOKIE: false
       N8N_HOST: ${DOMAIN}
       N8N_PORT: 5678
+      N8N_PATH: /n8n
       N8N_PROTOCOL: https
       NODE_ENV: production
-      WEBHOOK_URL: https://${DOMAIN}/
+      WEBHOOK_URL: https://${DOMAIN}/n8n/
       GENERIC_TIMEZONE: ${TIMEZONE}
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: supabase-db
@@ -764,14 +738,19 @@ services:
     #   - "traefik.http.routers.n8n.rule=Host(`${DOMAIN}`) && PathPrefix(`/n8n`)"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.n8n.rule=Host(`${DOMAIN}`) && PathPrefix(`/n8n`)"
+      - "traefik.http.routers.n8n.rule=PathPrefix(`/n8n`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls.certresolver=myresolver"
       - "traefik.http.services.n8n.loadbalancer.server.port=5678"
-
+      - "traefik.http.middlewares.n8n-stripprefix.stripprefix.prefixes=/n8n"
+      - "traefik.http.routers.n8n.middlewares=n8n-stripprefix"
   # AI Flow Management
   flowise:
     image: flowiseai/flowise:latest
     container_name: flowise
     environment:
+      PORT: 3000
+      HOST: 0.0.0.0
       DATABASE_PATH: /opt/flowise/.flowise
       APIKEY_PATH: /opt/flowise/.flowise
       SECRETKEY_PATH: /opt/flowise/.flowise
@@ -787,10 +766,11 @@ services:
     #   - "traefik.enable=true"
     #   - "traefik.http.routers.flowise.rule=Host(`${DOMAIN}`) && PathPrefix(`/flowise`)"
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.flowise.rule=Host(`${DOMAIN}`) && PathPrefix(`/flowise`)"
+      - "traefik.http.routers.flowise.rule=PathPrefix(`/flowise`)"
+      - "traefik.http.middlewares.flowise-stripprefix.stripprefix.prefixes=/flowise"
+      - "traefik.http.routers.flowise.middlewares=flowise-stripprefix"
       - "traefik.http.services.flowise.loadbalancer.server.port=3000"
-  
+
   #####################
   #      UI Layer     #
   #####################
@@ -799,14 +779,15 @@ services:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
     environment:
+      OPEN_WEBUI_ROOT_PATH: /webui
       OLLAMA_BASE_URL: http://ollama:11434
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
-      DATABASE_URL: postgresql://supabase_admin:your_secure_supabase_password@supabase-db:5432/postgres?&options=-csearch_path%3Dwebui
+      DATABASE_URL: postgresql://supabase_admin:${SUPABASE_DB_PASSWORD}@${SUPABASE_DB_HOST}:5432/postgres?&options=-csearch_path%3Dwebui
       # DATABASE_URL: postgres://webui_user:${WEBUI_DB_PASSWORD}@supabase-db:5432/webui
     volumes:
       - open-webui-data:/app/backend/data
     depends_on:
-      # - supabase-db
+      - supabase-db
       - ollama
     ports:
       - 8081:8080
@@ -815,6 +796,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.webui.rule=Host(`${DOMAIN}`) && PathPrefix(`/webui`)"
+      # - "traefik.http.middlewares.n8n-stripprefix.stripprefix.prefixes=/webui"
       - "traefik.http.services.webui.loadbalancer.server.port=8080"
   
   ######################
@@ -1014,6 +996,14 @@ services:
       - /var/log:/var/log:ro
     command: -config.file=/etc/promtail/config.yaml
 
+  ngrok:
+    image: wernight/ngrok
+    command: http n8n:5678
+    ports:
+      - "4040:4040" # ngrok API
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+      
 networks:
   agentic-network:
     driver: bridge
@@ -1036,3 +1026,5 @@ volumes:
   grafana-data:
   qdrant-data:
   db-config:
+  chroma_data:
+  weaviate-data:

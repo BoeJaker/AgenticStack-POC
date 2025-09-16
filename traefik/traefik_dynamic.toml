@@ -1,0 +1,5 @@
+
+[[tls.certificates]]
+  certFile = /home/boejaker/LLM_Stack/agentic-ai-stack-2/traefik//llm.int.crt
+  keyFile = /home/boejaker/LLM_Stack/agentic-ai-stack-2/traefik//llm.int.key
+
