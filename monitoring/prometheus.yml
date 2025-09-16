@@ -17,11 +17,11 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
   
-  - job_name: 'ollama'
-    static_configs:
-      - targets: ['ollama:11434']
-    metrics_path: '/metrics'
-    scrape_interval: 1m
+  # - job_name: 'ollama'
+  #   static_configs:
+  #     - targets: ['ollama:11434']
+  #   metrics_path: '/metrics'
+  #   scrape_interval: 1m
 
   - job_name: 'agentic-core'
     static_configs:
@@ -41,18 +41,57 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 10s
 
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['supabase-db:5432']
+
+  # - job_name: 'neo4j'
+  #   static_configs:
+  #     - targets: ['neo4j:2004']
+
+  # - job_name: 'n8n'
+  #   static_configs:
+  #     - targets: ['n8n:5678']
+
+  # Docker containers via cAdvisor
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Node metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # PostgreSQL metrics
   - job_name: 'postgres'
     static_configs:
-      - targets: ['supabase-db:5432']
+      - targets: ['postgres-exporter:9187']
 
+  # Application metrics
+  - job_name: 'supabase-services'
+    static_configs:
+      - targets: ['kong:8000', 'auth:9999', 'rest:3000', 'realtime:4000', 'storage:5000']
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Custom application metrics
+  - job_name: 'ollama'
+    static_configs:
+      - targets: ['ollama:11434']
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Vector metrics
+  - job_name: 'vector'
+    static_configs:
+      - targets: ['vector:9001']
+
+  # Neo4j metrics (if enabled)
   - job_name: 'neo4j'
     static_configs:
-      - targets: ['neo4j:2004']
-
-  - job_name: 'n8n'
-    static_configs:
-      - targets: ['n8n:5678']
-
+      - targets: ['neo4j-stack:2004']
+    metrics_path: /db/manage/server/jmx/query
   # - job_name: 'ollama'
   #   static_configs:
   #     - targets: ['ollama:11434']

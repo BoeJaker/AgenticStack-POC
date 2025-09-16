@@ -1190,11 +1190,11 @@ services:
   # Loki - Log aggregation system
   # Horizontally scalable, multi-tenant log aggregation
   # Works seamlessly with Grafana for log visualization
-   loki:
+  loki:
     image: grafana/loki:2.9.0
     container_name: loki
     volumes:
-      - ./monitoring/loki/loki-config.yaml:/etc/loki/local-config.yaml
+      - ./monitoring/Loki/loki-config.yml:/etc/loki/local-config.yaml
       - loki-data:/loki
     ports:
       - "3100:3100"
