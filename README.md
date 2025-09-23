@@ -1,6 +1,12 @@
 # Agentic AI Docker Stack
 
-A comprehensive, self-hosted agentic AI system with knowledge graph memory, proactive thinking, and multi-modal capabilities.
+A comprehensive, self-hosted agentic AI system with knowledge graph memory, resource-aware model routing, and multi-modal capabilities.
+
+## Purpose
+
+- Testing code that leverages multimodal LLMs
+- Performance tracking and benchmarking against enterprise solutions
+- Framework for rapid prototyping
 
 ## 🏗️ Architecture Overview
 
@@ -51,17 +57,26 @@ make status
 
 ## 🧠 Key Features
 
+### Out of the Box Features
+- Scalable from single cpu inference to multi gpu / clustered infrastructure.
+- Duplex api integration with commercial APIs.
+- Ollama performance optimizations (automated).
+- Workflow creation with n8n & a webook tunnel via ngrok
+- Drop-in tooling call the mcp server from n8n, flowise, open-webui, or directly within oillama chat itself
+- Agent builder using Flowise
+- Chat Interface using open-webui
+
 ### Intelligent Model Routing
 - **Light models** (llama3.2:3b) for simple queries
 - **Heavy models** (llama3.1:8b+) for complex reasoning
 - **Automatic complexity detection** using linguistic analysis
 - **Load balancing** and **performance optimization**
 
-### Proactive AI Agent
+<!-- ### Proactive AI Agent
 - **Autonomous thinking** cycles every 5 minutes (configurable)
 - **Pattern analysis** of user interactions
 - **Proactive suggestions** and insights
-- **Context-aware** memory system
+- **Context-aware** memory system -->
 
 ### Advanced Memory System
 - **Vector embeddings** for semantic search

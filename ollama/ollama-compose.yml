@@ -1,0 +1,95 @@
+version: "3.9"
+
+services:
+  # ---------------- CPU Ollama ----------------
+  ollama-cpu:
+    image: ollama/ollama:latest
+    container_name: ollama-cpu
+    restart: unless-stopped
+    environment:
+      - OLLAMA_KEEP_ALIVE=86400
+      - OLLAMA_NUM_THREADS=${CPU_CORES}
+      - OLLAMA_MODEL_PATH=/mnt/ramdisk_cpu
+    volumes:
+      - ollama_data_cpu:/root/.ollama
+      - ramdisk_cpu:/mnt/ramdisk_cpu
+      - ./preload/preload_models.py:/app/preload_models.py
+    ports:
+      - "11435:11434"
+    command: >
+      /bin/bash -c "
+      python /app/preload_models.py &&
+      ollama serve --port 11434
+      "
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_CORES}"
+          memory: "${CPU_MEMORY}"
+
+  # ---------------- GPU Ollama (dynamic) ----------------
+  ollama-gpu:
+    image: ollama/ollama:latest
+    container_name: ollama-gpu
+    restart: unless-stopped
+    environment:
+      - OLLAMA_KEEP_ALIVE=99999999
+      - OLLAMA_MODEL_PATH=/mnt/ramdisk_gpu
+      - GPU_NAMES=${GPU_NAMES}
+      - GPU_IDS=${GPU_IDS}
+    volumes:
+      - ollama_data_gpu:/root/.ollama
+      - ramdisk_gpu:/mnt/ramdisk_gpu
+      - ./preload/preload_models.py:/app/preload_models.py
+    ports:
+      - "11436:11434"
+    runtime: nvidia
+    command: >
+      /bin/bash -c "
+      if [ -n \"$GPU_NAMES\" ]; then
+          python /app/preload_models.py &&
+          ollama serve --port 11434
+      else
+          echo 'No GPU detected, container idle'; sleep infinity
+      fi
+      "
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: "${GPU_MEMORY}"
+
+  # ---------------- FastAPI GPU/CPU-aware Router ----------------
+  ollama-router:
+    build: ./router
+    container_name: ollama-router
+    restart: unless-stopped
+    environment:
+      - GPU_NAMES=${GPU_NAMES}
+      - GPU_IDS=${GPU_IDS}
+      - PRELOAD_MODELS=${PRELOAD_MODELS}
+    ports:
+      - "11434:80"
+    depends_on:
+      - ollama-cpu
+      - ollama-gpu
+
+volumes:
+  ollama_data_cpu:
+  ollama_data_gpu:
+  ramdisk_cpu:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=${CPU_RAMDISK_SIZE}
+  ramdisk_gpu:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=${GPU_RAMDISK_SIZE}

@@ -1,0 +1,87 @@
+version: '3.8'
+# Add this to your existing docker-compose.yml services section
+# Replace the existing ollama-openai-shim service with this enhanced version
+services:
+  # Enhanced Ollama API Shim with full stack integration
+  ollama-enhanced-shim:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    container_name: ollama-shim
+    restart: unless-stopped
+    environment:
+      # Ollama connection
+      OLLAMA_BASE_URL: http://ollama:11434
+      
+      # Database connections
+      SUPABASE_DB_URL: postgresql://supabase_admin:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
+      NEO4J_URI: bolt://neo4j-stack:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      WEAVIATE_URL: http://weaviate:8080
+      
+      # MCP server connection
+      MCP_SERVER_URL: http://mcp-server:8000
+      
+      # Configuration
+      EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+      MAX_CONTEXT_TOKENS: 8192
+      SIMILARITY_THRESHOLD: 0.7
+      MAX_MEMORY_ENTRIES: 50
+      
+      # Feature flags
+      ENABLE_KNOWLEDGE_GRAPH: "true"
+      ENABLE_VECTOR_SEARCH: "true" 
+      ENABLE_MEMORY: "true"
+      ENABLE_TOOLS: "true"
+      ENABLE_CACHING: "true"
+      
+      # Logging
+      LOG_LEVEL: INFO
+      
+    volumes:
+      # Cache for ML models
+      - ollama-shim-cache:/app/cache
+      
+    ports:
+      - "8082:8080"  # Different port to avoid conflicts
+      
+    # depends_on:
+    #   - ollama
+    #   - supabase-db  
+    #   - neo4j-stack
+    #   - weaviate
+    #   - mcp-server
+      
+    networks:
+      - agentic-network
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/shim/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Allow time for model loading
+      
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ollama-shim.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/ollama`)"
+      - "traefik.http.middlewares.ollama-shim-stripprefix.stripprefix.prefixes=/api/ollama"
+      - "traefik.http.routers.ollama-shim.middlewares=ollama-shim-stripprefix"
+      - "traefik.http.services.ollama-shim.loadbalancer.server.port=8080"
+      
+    # Resource limits to prevent memory issues during model loading
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+networks:
+  agentic-network:
+    external: true
+
+# Add this volume to your volumes section
+volumes:
+  # ... existing volumes ...
+  ollama-shim-cache:

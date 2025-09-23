@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Request Log</title>
+</head>
+<body>
+    <h1>Captured Requests</h1>
+    <ul>
+        {% for log in logs %}
+            <li>
+                <strong>{{ log.method }} {{ log.url }}</strong><br>
+                Body: <pre>{{ log.body }}</pre>
+            </li>
+        {% endfor %}
+    </ul>
+</body>
+</html>

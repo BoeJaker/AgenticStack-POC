@@ -6,21 +6,23 @@ help:
 	@echo "Agentic AI Docker Stack Management"
 	@echo "=================================="
 	@echo "Available commands:"
-	@echo "  setup          - Initial setup of the entire stack"
-	@echo "  build          - Build all custom Docker images"
-	@echo "  up             - Start all services"
-	@echo "  down           - Stop all services"
-	@echo "  restart        - Restart all services"
-	@echo "  logs           - Show logs for all services"
-	@echo "  logs-follow    - Follow logs in real-time"
-	@echo "  clean          - Clean up volumes and networks"
-	@echo "  init-db        - Initialize databases"
-	@echo "  setup-models   - Download and setup AI models"
-	@echo "  health         - Check health of all services"
-	@echo "  status         - Show status of all services"
-	@echo "  scale          - Scale services up/down"
-	@echo "  backup         - Backup databases"
-	@echo "  restore        - Restore from backup"
+	@echo "  setup             - Initial setup of the entire stack"
+	@echo "  build             - Build all custom Docker images"
+	@echo "  up                - Start all services"
+	@echo "  down              - Stop all services"
+	@echo "  restart           - Restart all services"
+	@echo "  logs              - Show logs for all services"
+	@echo "  logs-follow       - Follow logs in real-time"
+	@echo "  clean             - Clean up volumes and networks"
+	@echo "  init-db           - Initialize databases"
+	@echo "  setup-models      - Download and setup AI models"
+	@echo "  health            - Check health of all services"
+	@echo "  status            - Show status of all services"
+	@echo "  scale-ollama-min  - Scale Ollama resources to their minimum"
+	@echo "  scale-ollama-max  - Scale Ollama resources to their maximum"
+	@echo "  scale             - Scale services up/down"
+	@echo "  backup            - Backup databases"
+	@echo "  restore           - Restore from backup"
 
 # Environment setup
 .env:
@@ -120,6 +122,17 @@ status:
 	@echo "Service Status:"
 	@echo "==============="
 	docker-compose ps
+
+# Scale Ollama resources
+scale-ollama-min:
+	@echo "Scaling Ollama resources..."
+	docker update ollama --cpus=25
+	@echo "Ollama scaled, using 25 CPU cores."
+
+scale-ollama-max:
+	@echo "Scaling Ollama resources..."
+	docker update ollama --cpus=35
+	@echo "Ollama scaled, using 35 CPU cores."
 
 # Scale services
 scale-light:
