@@ -34,7 +34,9 @@ from neo4j import AsyncGraphDatabase
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import re
+from dotenv import load_dotenv
 
+load_dotenv()
 # import asyncio
 # import uuid
 # import time
@@ -228,7 +230,7 @@ class ResourceMonitor:
         except Exception as e:
             logging.error(f"Resource check failed: {e}")
             return True  # Default to allowing requests on error
-    
+
     def _get_ollama_avg_response_time(self) -> float:
         """Get average Ollama response time from metrics"""
         # This would integrate with Prometheus to get recent average
@@ -246,16 +248,16 @@ class ResourceMonitor:
 # ============================================================================
 # CONFIGURATION AND MODELS
 # ============================================================================
-
+import os
 class Config:
     """Configuration settings for the API shim"""
     # Service endpoints
     OLLAMA_BASE_URL = "http://ollama:11434"
-    SUPABASE_DB_URL = "postgresql://supabase_admin:your_secure_supabase_password@supabase-db:5432/postgres"
+    SUPABASE_DB_URL = f"postgresql://{os.getenv('SUPABASE_SHIM_USER')}:{os.getenv('SUPABASE_DB_PASSWORD')}@{os.getenv('SUPABASE_DB_CONTAINER')}:5432/{os.getenv('SUPABASE_DB_NAME')}"
     WEAVIATE_URL = "http://weaviate:8080"
     NEO4J_URI = "bolt://172.17.0.1:7687"
-    NEO4J_USERNAME = "neo4j"
-    NEO4J_PASSWORD = ""
+    NEO4J_USERNAME = os.getenv('NEO4J_USERNAME')
+    NEO4J_PASSWORD = os.getenv('NEO4J_PASSWORD')
     MCP_SERVER_URL = "http://mcp-server:8000"
     
     # AI Configuration
