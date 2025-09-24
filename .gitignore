@@ -1,6 +1,8 @@
 .notes.md
 venv/*
 letsencrypt/*
-traefik/.*.crt
-traefik/.*.key
+src/letsencrypt/*
+src/traefik/*.crt
+src/traefik/*.key
 .env
+.obsidian/*
